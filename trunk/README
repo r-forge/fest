@@ -1,0 +1,8 @@
+The R package FEST 
+requires the following freeware to be installed and path variables to be set:
+    *   Merlin (http://www.sph.umich.edu/csg/abecasis/merlin/index.html)
+    *   Perl (http://www.activestate.com/activeperl/)
+To set the path variables in Windows, right-click “My Computer”, select
+Properties>Advanced>Environment Variables, and add the locations of Merlin and Perl to the
+variable named Path.
+Further documentation on FEST is available at http://folk.uio.no/thoree/FEST.

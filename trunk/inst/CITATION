@@ -1,0 +1,17 @@
+citHeader("To cite FEST in publications use:")
+
+citEntry(entry       = "article",
+	title        = "Identification of distant family relationships",
+	author       = personList(
+			person(first="Øivind", last="Skare", email="oivind.skare@medisin.uio.no"),
+			person(first="Nuala", last="Sheehan", email="nas11@leicester.ac.uk"),
+			person(first="Thore", last="Egeland", email="thore.egeland@medisin.uio.no")),
+	journal      = "Bioinformatics",
+	year         = 2009,
+	note	     = "Bioinformatics Advance Access published July 6.",
+	url          = "http://bioinformatics.oxfordjournals.org/",
+	textVersion  = paste("Skare, Ø., Sheehan, N., and Egeland, T. (2009).",
+		"Identification of distant family relationships.",
+		"Bioinformatics Advance Access published July 6, 2009.")
+	)
+

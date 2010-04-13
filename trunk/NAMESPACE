@@ -1,0 +1,16 @@
+export("SimulationStudy",
+       "SetModels",
+       "RealStudy",
+       "SetDataPars",
+       "ComputeSummaryStatistics",
+       "PlotPedigree",
+       "SortMerlinInputFiles",
+       "ThinMerlinInputFiles")
+exportClasses("Model", "SimStudyObject")
+exportMethods("initialize")
+##importFrom("quantreg", latex.table)
+import("methods")
+##importFrom("Hmisc", approxExtrap)
+importFrom("kinship", align.pedigree, kindepth, autohint)
+importFrom("MASS", write.matrix)
+##importFrom("hapsim", haplosim)
