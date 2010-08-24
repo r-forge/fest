@@ -44,16 +44,14 @@ prefixMerlin.input <- paste(prefix.tmpfiles, "for", sep="")
   ##  assignInNamespace("haplosim", "haplosim.fix", pos="package:hapsim")
   ##  reassignInPackage("haplosim", pkgName="hapsim", haplosim.fix)
   haplosim <- haplosim.fix # hapsim does not have a name space
-  
+
   ## Check if merlin is installed
-  merlinOutput <- suppressWarnings(system("merlin", intern=TRUE,
-                                          ignore.stderr=TRUE))
-  if (length(merlinOutput) == 0) {
-    warning("merlin is not installed! Must be installed for FEST to be operative.")
+  merlinOutput <- suppressWarnings(try(system("merlin", intern=TRUE, ignore.stderr=TRUE), silent=TRUE))
+  if (inherits(merlinOutput, "try-error")) {
+    stop("merlin is not installed! Must be installed for FEST to be operative.")
   }
-  perlOutput <- suppressWarnings(system("perl --version", intern=TRUE, ignore.stderr=TRUE))
-  if (length(perlOutput) == 0) {
-    warning("perl is not installed! Must be installed for FEST to be operative.")
+  perlOutput <- try(system("perl --version", intern=TRUE, ignore.stderr=TRUE), silent=TRUE)
+  if (inherits(perlOutput, "try-error")) {
+    stop("perl is not installed! Must be installed for FEST to be operative.")
   }
-    
 }
