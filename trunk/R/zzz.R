@@ -46,11 +46,12 @@ prefixMerlin.input <- paste(prefix.tmpfiles, "for", sep="")
   haplosim <- haplosim.fix # hapsim does not have a name space
   
   ## Check if merlin is installed
-  merlinOutput <- system("merlin", intern=TRUE, ignore.stderr=TRUE)
+  merlinOutput <- suppressWarnings(system("merlin", intern=TRUE,
+                                          ignore.stderr=TRUE))
   if (length(merlinOutput) == 0) {
     warning("merlin is not installed! Must be installed for FEST to be operative.")
   }
-  perlOutput <- system("perl --version", intern=TRUE, ignore.stderr=TRUE)
+  perlOutput <- suppressWarnings(system("perl --version", intern=TRUE, ignore.stderr=TRUE))
   if (length(perlOutput) == 0) {
     warning("perl is not installed! Must be installed for FEST to be operative.")
   }

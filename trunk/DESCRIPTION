@@ -1,6 +1,6 @@
 Package: FEST
-Version: 0.07
-Date: 12 April 2010 version of FEST, R version 2.10.1
+Version: 0.08
+Date: 24 August 2010 version of FEST, R version 2.11.0
 Author: Øivind Skare <oivind.skare@medisin.uio.no>
 Maintainer: Øivind Skare <oivind.skare@medisin.uio.no>
 Description: Identification of Family Relations using linked markers.
@@ -11,4 +11,3 @@ License: GPL (>= 2)
 LazyLoad: yes
 Encoding: UTF-8
 URL: http://folk.uio.no/thoree/FEST
-Packaged: Fri Jan 25 13:30:07 2008; skare
