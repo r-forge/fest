@@ -10,4 +10,4 @@ SystemRequirements: merlin, perl
 License: GPL (>= 2)
 LazyLoad: yes
 Encoding: UTF-8
-URL: http://folk.uio.no/thoree/FEST
+URL: http://folk.uio.no/thoree/FEST, http://www.sph.umich.edu/csg/abecasis/merlin/index.html
