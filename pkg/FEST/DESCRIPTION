@@ -1,6 +1,6 @@
 Package: FEST
-Version: 0.08
-Date: 24 August 2010 version of FEST, R version 2.11.0
+Version: 0.09
+Date: 25 May 2011 version of FEST, R version 2.13.0
 Author: Øivind Skare <oivind.skare@medisin.uio.no>
 Maintainer: Øivind Skare <oivind.skare@medisin.uio.no>
 Description: Identification of Family Relations using linked markers.

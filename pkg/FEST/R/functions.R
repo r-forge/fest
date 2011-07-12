@@ -71,86 +71,6 @@ SetModels <- function(trueModels,
   model
 }
 
-SimulationStudyLD <- function(models,
-                              ##                              chr=22,
-                              nmarker=c(10,100,1000, Inf),
-                              nsim=c(1000,1000,1000,400),
-                              frequencyData=NULL,
-                              freqThreshold=c(rep(0.1, 4), 0.0),
-                              limitCentiMorgan=0,
-                              saveMerlinFiles=FALSE,
-                              verbose=TRUE) {
-  
-  op <- options(stringAsFactors=FALSE)
-  on.exit(options(op))
-
-  chr <- 22 ## Temporary restricted to chromosome 22
-  
-  if (length(nmarker) != length(nsim)) {
-    stop("Input variables nmarker and nsim have unequal lengths")
-  }
-  if (min(nsim) <= 0) {
-    stop("Input variable nsim must be >= 1")
-  }
-  if (length(nmarker) != length(nsim)) {
-    stop("Input variables nmarker and nsim have unequal lengths")
-  }
-
-  if (is.vector(chr)) {
-    nchr <- rep(length(chr), length(nmarker))
-  }
-  else if (is.list(chr)) {
-    nchr <- lapply(chr, length)
-    if (length(nchr) != length(nsim)) {
-      stop("List chr and and vector nsim have unequal lengths")
-    }
-    p <- length(nmarker)
-
-    chr.list <- vector("list", p)
-    for (i in 1:p) {
-      chr.list[[i]] <- chr
-    }
-    chr <- chr.list
-  }
-  else {
-    stop("Input variable chr should be a vector or a list")
-  }
-  if (any(nchr > nmarker)) {
-    stop("Number of markers less than number of chromosomes")
-  }
-
-  if (length(nmarker) != length(freqThreshold)) {
-    stop("Input variables nmarker and freqThreshold have unequal lengths")
-  }
-
-  if (is.null(frequencyData)) {
-    affy22.sub <- InitializeLD(chunkSize=1000)
-    ## check hapdat$freq med affy22.sub
-  }
-  else {
-    affy22.sub <- frequencyData
-  }
-
-###Thinning of frequencyData
-  
-  affy22 <- vector("list", 22)
-  affy22[[22]] <- affy22.sub
-    
-  neach <- nmarker/nchr
-  simres <- SimulationStudyWithFrequencyData(models, chr=chr, neach=neach,
-                                             nsim=nsim, frequencyData=affy22, #frequencyData,
-                                             freqThreshold=freqThreshold,
-                                             limitCentiMorgan=limitCentiMorgan,
-                                             saveMerlinFiles=saveMerlinFiles,
-                                             verbose=verbose, LD=TRUE)
-  
-  lnliks <- simres$lnliks
-  nmarker <- simres$nmarker
-  simObject <- new("SimStudyObject", logLik=lnliks, nsim=as.integer(nsim),
-                   nmarker=as.integer(nmarker), model=models, maf=numeric(),
-                   freqThreshold=freqThreshold)
-  simObject
-}
 
 
 SimulationStudy <- function(models,
@@ -235,6 +155,215 @@ SimulationStudy <- function(models,
   
   simObject <- new("SimStudyObject", logLik=lnliks, nsim=as.integer(nsim),
                    nmarker=as.integer(nmarker), model=models, maf=maf,
+                   freqThreshold=freqThreshold)
+  simObject
+}
+
+
+InitializeLD <- function(chunkSize=1000, ldPath="", ldFile="ld_chr22_CEU.txt") {
+  op <- options(stringsAsFactors=FALSE)
+  on.exit(options(op))
+
+  cat("Select Hapmap LD subset: Only SNPs in Affymetrix 500K are retained\n")
+  cmd <- paste("perl", paste(get("FEST.perlpath", envir=topenv(), inherits = FALSE), "hapmapLD_affy.pl", sep=""), ldFile, "../Data/Affy500K_Allele_Frequency_Files/chr22.freq.txt")
+  system(cmd)
+  cat("Divide LD file into chunks of size ", chunkSize , "\n")
+  ldFile.affy <- paste(ldPath, ldFile, ".affy", sep="")
+
+  if (!file.exists(ldFile.affy)) {
+    stop(ldFile.affy, " does not exist")
+  }
+
+
+  cmd <- paste("perl", paste(get("FEST.perlpath", envir=topenv(), inherits = FALSE), "hapmapLD_divide.pl", sep=""), ldFile.affy, chunkSize)
+  res <- system(cmd, intern=TRUE)
+  nchunk <- as.integer(unlist(strsplit(res, " "))[1])
+
+  ##  datadir <- "."
+  ##  files <- list.files(datadir, pattern=glob2rx("ld*.chunk*"))
+  files <- paste(ldFile.affy, ".chunk", 1:nchunk, sep="")
+
+  for (f in files) {
+    if (!file.exists(f)) {
+      stop(f, " does not exist")
+    }
+  }
+
+
+  ##  nchunk <- length(files)
+  cat("Number of chunks: ", nchunk, "\n")
+
+  ##  download.file("http://folk.uio.no/thoree/FEST/affy.RData", "affy.RData")
+  affy <- NULL # define affy such that R CMD check do not report warnings.
+  load("affy.RData") ## get affy
+  affy22 <- affy[[22]] #SNP         cM     A     C
+
+  hapdat <- vector("list", nchunk)
+  ind.affy <- NULL
+  for (i in 1:nchunk) {
+    ldObj <- read.table(files[i], header=TRUE)
+
+    snps <- unique(ldObj$snp1)
+
+    ind <- which(affy22[,"SNP"] %in% snps)
+    affy22.sub <- affy22[ind,]
+    ind.affy <- c(ind.affy, ind)
+
+    snps.affy <- affy22[ind,"SNP"]
+
+    if (0) {
+      rsMatch <- "rs2092183" %in% snps.affy
+      cat("rsMatch1: ", i, " ", rsMatch, "\n")
+    }
+    
+    indLD <- (ldObj[,"snp1"] %in% snps.affy) & (ldObj[,"snp2"] %in% snps.affy)
+    ldObj.sub <- ldObj[indLD,]
+    
+    nsnps <- length(snps.affy)
+    r2mat <- matrix(0,nrow=nsnps, ncol=nsnps)
+    rownames(r2mat) <- snps.affy
+    colnames(r2mat) <- snps.affy
+
+    nLD <- nrow(ldObj.sub)
+    snp1 <- ldObj.sub[,"snp1"]
+    snp2 <- ldObj.sub[,"snp2"]
+    r2 <- ldObj.sub[,"R2"]
+    for (j in 1:nLD) {
+      r2mat[snp1[j],snp2[j]] <- r2[j]
+      r2mat[snp2[j],snp1[j]] <- r2[j]
+    }
+    diag(r2mat) <- 1
+
+    cat("Make Haplodata object for chunk ", i, "\n")
+    freqs <- affy22.sub[,"A"]
+    names(freqs) <- snps.affy
+    if (0) {
+      rsMatch <- "rs2092183" %in% names(freqs)
+      cat("rsMatch2: ", i, " ", rsMatch, "\n")
+    }
+    hapdat[[i]] <- MakeHaplodataObject(freqs, r2mat)
+    if (0) {
+      rsMatch <- "rs2092183" %in% names(hapdat[[i]]$freqs)
+      cat("rsMatch3: ", i, " ", rsMatch, "\n")
+    }
+  }
+  affy22.hapmap <- affy22[ind.affy, ]
+  
+  ##  assign("hapdat", hapdat, envir=.GlobalEnv)   ##topenv())
+
+  file.hapdat <- "hapdat.Rdata"
+  cat("Write HapMap LD correlation data to ", file.hapdat, "\n")
+  save(hapdat, file=file.hapdat)
+
+  file.affy <- "affy22.hapmap.Rdata"
+  save(affy22.hapmap, file=file.affy)
+  list(file.hapdat=file.hapdat, file.affy=file.affy)
+}
+
+
+## Simulation study with markers in LD, simulated using hapsim
+## Consider only one chromosome, for the moment this
+## is assumed to be chromosome 22
+SimulationStudyLD <- function(models,
+                              nmarker=c(10,100,1000, Inf),
+                              nsim=c(1000,1000,1000,400),
+                              freqThreshold=c(rep(0.1, 4), 0.0),
+                              ##                              limitCentiMorgan=0,
+                              saveMerlinFiles=FALSE,
+                              verbose=TRUE,
+                              frequencyFile=NULL,
+                              hapdatFile=NULL) {
+  
+  op <- options(stringsAsFactors=FALSE)
+  on.exit(options(op))
+
+  chr <- 22 ## Temporary restricted to chromosome 22
+  
+  if (length(nmarker) != length(nsim)) {
+    stop("Input variables nmarker and nsim have unequal lengths")
+  }
+  if (min(nsim) <= 0) {
+    stop("Input variable nsim must be >= 1")
+  }
+
+  if (is.vector(chr)) {
+    p <- length(nmarker)
+    nchr <- rep(length(chr), length(nmarker))
+
+    chr.list <- vector("list", p)
+    for (i in 1:p) {
+      chr.list[[i]] <- chr
+    }
+    chr <- chr.list
+   }
+  else if (is.list(chr)) {
+    nchr <- lapply(chr, length)
+    if (length(nchr) != length(nsim)) {
+      stop("List chr and and vector nsim have unequal lengths")
+    }
+ }
+  else {
+    stop("Input variable chr should be a vector or a list")
+  }
+  if (any(nchr > nmarker)) {
+    stop("Number of markers less than number of chromosomes")
+  }
+
+  if (length(nmarker) != length(freqThreshold)) {
+    stop("Input variables nmarker and freqThreshold have unequal lengths")
+  }
+
+  if (!file.exists(frequencyFile)) {
+    stop("File ", frequencyFile, " does not exist")
+  }
+  if (!file.exists(hapdatFile)) {
+    stop("File ",  hapdatFile, " does not exist")
+  }
+
+  load(frequencyFile, envir=.GlobalEnv) ## affy22.hapmap
+  load(hapdatFile, envir=.GlobalEnv)  ## hapdat
+
+  if (!exists("affy22.hapmap", envir=.GlobalEnv)) {
+    stop("Variable affy22.hapmap not load from file ", frequencyFile)
+  }
+  if (!exists("hapdat", envir=.GlobalEnv)) {
+    stop("Variable affy22.hapmap not load from file ", hapdatFile)
+  }
+  
+##  if (0) {
+##    if (initLD) {
+#### Side effects: hapdat object saved to file and assigned to top environment
+##      affy22.sub <- InitializeLD(chunkSize=1000, ldPath=ldPath, ldFile=ldFile)
+##      save(affy22.sub, file="affy22.sub.Rdata") ## only Affymetrix SNPs that are in hapmap
+##      ## check hapdat$freq med affy22.sub
+##    }
+##    else if (is.null(frequencyData)) {
+##      load("affy22.sub.Rdata")  ##load("affy.RData") # get affy
+##      ##    affy22.sub <- affy[[22]]
+##    }
+##    else {
+##      affy22.sub <- frequencyData
+##    }
+##  }
+  
+###Thinning of frequencyData
+  
+  affy22 <- vector("list", 22)
+  affy22[[22]] <- affy22.hapmap
+    
+  neach <- nmarker/nchr
+  limitCentiMorgan <- 0 ## Not yet in use
+  simres <- SimulationStudyWithFrequencyData(models, chr=chr, neach=neach,
+                                             nsim=nsim, frequencyData=affy22, #frequencyData,
+                                             freqThreshold=freqThreshold,
+                                             limitCentiMorgan=limitCentiMorgan,
+                                             saveMerlinFiles=saveMerlinFiles,
+                                             verbose=verbose, LD=TRUE)
+  
+  lnliks <- simres$lnliks
+  nmarker <- simres$nmarker
+  simObject <- new("SimStudyObject", logLik=lnliks, nsim=as.integer(nsim),
+                   nmarker=as.integer(nmarker), model=models, maf=numeric(),
                    freqThreshold=freqThreshold)
   simObject
 }
@@ -497,13 +626,19 @@ SimulationStudyWithFrequencyData <- function(model, chr,
     subFreq <- SelectSNPs(frequencyData, neach=neach[i], chr=chr[[i]], threshold=freqThreshold[i],
                           limitCentiMorgan=limitCentiMorgan)
 
+    if (0) { # for debug purposes
+      n.sub <- nrow(subFreq[[1]])
+      for (i.sub in 1:n.sub)
+        subFreq[[1]][i.sub,3:4] <- c(0.5,0.5)
+    }
+    
     if (LD) {
-      SelectHapdat(subFreq)
+      SelectHapdat(subFreq[[1]])  ## Only 1 chromosome for LD simulation
     }
     WriteInputFiles(subFreq, chr=chr[[i]])
-    nmarker <- sum(unlist(lapply(subFreq, nrow)))
+    nmarker.sub <- sum(unlist(lapply(subFreq, nrow)))
     nchr <- length(chr[[i]])
-    lnliks[[i]] <- RunAnalysesAll(model=model, nmarker=nmarker, nchr=nchr,
+    lnliks[[i]] <- RunAnalysesAll(model=model, nmarker=nmarker.sub, nchr=nchr,
                                   nsim=nsim[i], seed=startSeed,
                                   useInputFiles=TRUE, saveMerlinFiles=saveMerlinFiles,
                                   LD=LD)
@@ -566,14 +701,15 @@ CleanMerlinFiles <- function(prefixes, suffixes=c("ped", "freq", "dat", "map")) 
 ##  system(paste("rm -f ", prefix.ped, "*.map", sep=""))
 }
 
-SimulatePedigreesWithLD <- function(trueModel, nsim, seed, nSimInEachPedigree=5,
+SimulatePedigreesWithLD <- function(trueModel, nsim, nSimInEachPedigree=5,
                                     nmarker=NULL, altModels=NULL, nrows=NULL) {
   prefix.ped <- paste(prefix.tmpfiles, "simped_", sep="")
   for (i in 1:nsim) {
     simpedfile <- paste(prefix.ped, i, ".ped", sep="")
     SimulatePedigreeWithLD(trueModel=trueModel, simpedfile=simpedfile, nmarker=nmarker)
   }
-    
+
+  
   MergeSimulatedPedigrees(prefixSimFiles=prefix.ped, trueModel=trueModel,
                           nSimInEachPedigree=nSimInEachPedigree, nmarker=nmarker,
                           altModels=altModels, nrows=nrows)
@@ -589,7 +725,7 @@ SimulatePedigreeWithLD <- function(trueModel, simpedfile, nmarker) {
   
   nFounders <- sum(ped[,3] == 0)
 
-  hap <- SimulateHaplotypesLD(nmarker, 2*nFounders)
+  hap <- SimulateHaplotypesLD(2*nFounders) # number of markers as given by hapdat.sub
 
   markers <- ConditionalSimulation(hap, map$POS, ped)
   markers[!typed,] <- 0 # Set markers of untyped individuals = 0 (required by MergeSimulatedPedigrees)
@@ -597,74 +733,6 @@ SimulatePedigreeWithLD <- function(trueModel, simpedfile, nmarker) {
   ped.sim <- cbind(ped, markers, affected)
 
   write.table(ped.sim, file=simpedfile, col.names=FALSE, row.names=FALSE)
-}
-
-InitializeLD <- function(chunkSize=1000, ldFile="ld_chr22_CEU.txt") {
-  cat("Select Hapmap LD subset: Only SNPs in Affymetrix 500K are retained\n")
-  cmd <- paste("perl hapmapLD_affy.pl", ldFile, "../Data/Affy500K_Allele_Frequency_Files/chr22.freq.txt")
-  system(cmd)
-  cat("Divide LD file into chunks of size ", chunkSize , "\n")
-  ldFile.affy <- paste(ldFile, ".affy", sep="")
-  cmd <- paste("perl hapmapLD_divide.pl", ldFile.affy, chunkSize)
-  res <- system(cmd, intern=TRUE)
-  nchunk <- as.integer(unlist(strsplit(res, " "))[1])
-
-  ##  datadir <- "."
-  ##  files <- list.files(datadir, pattern=glob2rx("ld*.chunk*"))
-  files <- paste(ldFile.affy, ".chunk", 1:nchunk, sep="")
-
-  ##  nchunk <- length(files)
-  cat("Number of chunks: ", nchunk, "\n")
-
-  ##  download.file("http://folk.uio.no/thoree/FEST/affy.RData", "affy.RData")
-  affy <- NULL # define affy such that R CMD check do not report warnings.
-  load("affy.RData") ## get affy
-  affy22 <- affy[[22]] #SNP         cM     A     C
-
-  hapdat <- vector("list", nchunk)
-  ind.affy <- NULL
-  for (i in 1:nchunk) {
-    ldObj <- read.table(files[i], header=TRUE)
-
-    snps <- unique(ldObj$snp1)
-
-    ind <- which(affy22[,"SNP"] %in% snps)
-    affy22.sub <- affy22[ind,]
-    ind.affy <- c(ind.affy, ind)
-
-    snps.affy <- affy22[ind,"SNP"]
-
-    indLD <- (ldObj[,"snp1"] %in% snps.affy) & (ldObj[,"snp2"] %in% snps.affy)
-    ldObj.sub <- ldObj[indLD,]
-    
-    nsnps <- length(snps.affy)
-    r2mat <- matrix(0,nrow=nsnps, ncol=nsnps)
-    rownames(r2mat) <- snps.affy
-    colnames(r2mat) <- snps.affy
-
-    nLD <- nrow(ldObj.sub)
-    snp1 <- ldObj.sub[,"snp1"]
-    snp2 <- ldObj.sub[,"snp2"]
-    r2 <- ldObj.sub[,"R2"]
-    for (j in 1:nLD) {
-      r2mat[snp1[j],snp2[j]] <- r2[j]
-      r2mat[snp2[j],snp1[j]] <- r2[j]
-    }
-    diag(r2mat) <- 1
-
-    cat("Make Haplodata object for chunk ", i, "\n")
-    freqs <- affy22.sub[,"A"]
-    names(freqs) <- snps.affy
-    hapdat[[i]] <- MakeHaplodataObject(freqs, r2mat)
-  }
-  affy22.hapmap <- affy22[ind.affy, ]
-  
-  assign("hapdat", hapdat, envir=topenv())
-
-  file.hapdat <- "hapdat.Rdata"
-  cat("Write HapMap LD correlation data to ", file.hapdat, "\n")
-  save(hapdat, file=file.hapdat)
-  affy22.hapmap
 }
 
 MakeHaplodataObject <- function(freqs, cor) {
@@ -682,30 +750,60 @@ MakeHaplodataObject <- function(freqs, cor) {
 }
 
 
-SelectHapdat <- function(subFreq) {
-  hapdat <- NULL # Temporary, to avoid warnings in 'R CMD check'
+SelectHapdat <- function(subFreq, useNewFreq=TRUE) {
+  ##  hapdat <- NULL # Temporary, to avoid warnings in 'R CMD check'
   hapdat.sub <- hapdat
+  if (0) {
+    print(subFreq)
+  }
+  indF <- rep(FALSE, length(subFreq$SNP))
   for (i in 1:length(hapdat.sub)) {
     nm <- names(hapdat.sub[[i]]$freqs)
     
     ind <- which(nm %in% subFreq$SNP)
 
-    hapdat.sub[[i]]$freqs <- hapdat.sub[[i]]$freqs[ind]
-    hapdat.sub[[i]]$cor <- hapdat.sub[[i]]$cor[ind,ind]
-    hapdat.sub[[i]]$cov <- hapdat.sub[[i]]$cov[ind,ind]
+    if (useNewFreq && length(ind) > 0) {
+      indFreq <- match(nm[ind], subFreq$SNP)
+      hapdat.sub[[i]]$freqs <- subFreq$A[indFreq]
+    }
+    else {
+      hapdat.sub[[i]]$freqs <- hapdat.sub[[i]]$freqs[ind]
+    }
+    hapdat.sub[[i]]$cor <- hapdat.sub[[i]]$cor[ind,ind,drop=FALSE]
+    hapdat.sub[[i]]$cov <- hapdat.sub[[i]]$cov[ind,ind,drop=FALSE]
+
+  }
+  if (0) {
+    cat("Debug haplotypes\n")
+    for (i in 1:length(hapdat.sub)) {
+      cat("hapdat.sub[[", i, "]]\n")
+      cat("Frequency\n")
+      print(hapdat.sub[[i]]$freqs)
+      cat("LD correlation\n")
+      print(hapdat.sub[[i]]$cor)
+      cat("Covariance matrix for the normal distribution\n")
+      print(hapdat.sub[[i]]$cov)
+      cat("\n")
+    }
   }
 
-  assign("hapdat.sub", hapdat.sub, envir=topenv())
+  assign("hapdat.sub", hapdat.sub, envir=.GlobalEnv)  ##topenv())
 }
 
-#
-SimulateHaplotypesLD <- function(nmarker, nhap) {
+## Return haplotypes (matrix of dimension nhap x nmarkers)
+SimulateHaplotypesLD <- function(nhap) {
   u <- NULL
-  hapdat.sub <- NULL # Temporary, to avoid warnings in 'R CMD check'
+  ##  hapdat.sub <- NULL # Temporary, to avoid warnings in 'R CMD check'
   for (i in 1:length(hapdat.sub)) {
-    hsim <- haplosim.fix(nhap, hapdat.sub[[i]], force.polym=FALSE, summary=FALSE)
-    u <- cbind(u, hsim$data+1)
+    if (length(hapdat.sub[[i]]$freqs) > 0) {
+      hsim <- haplosim.fix(nhap, hapdat.sub[[i]], force.polym=FALSE, summary=FALSE)
+      u <- cbind(u, hsim$data+1)
+    }
   }
+
+##  if (0) {
+##    uall <<- rbind(uall, u) 
+##  }
   
   u
 }
@@ -727,18 +825,26 @@ ConditionalSimulation <- function(hap, mapPos, ped) {
     pIndex <- -1
     for (person in c(mother, father)) {
       n.recomb <- rpois(1, lambda=lambda)
+      phase.start <- sample(0:1, size=1)
       if (n.recomb > 0) {
         recomb.pos <- runif(n.recomb, min=ran[1], max=ran[2])
         index <- findInterval(recomb.pos, mapPos) + 1
         
-        u <- rep(0, nmarker)
-        u[index] <- 1
-        u <- (cumsum(u) %% 2) + 1
+
+        v <- rep(0, nmarker)
+        v[index] <- 1
+        v <- (cumsum(v) %% 2)
+        
+        u <- rep(phase.start, nmarker)
+        u <- (u + v) %% 2 + 1
       }
       else {
-        u <- rep(1, nmarker)
+        phase.start <- phase.start + 1
+        u <- rep(phase.start, nmarker)
       }
 
+      
+##      cat("u: ", u, "\n")
       for (j in 1:nmarker) { # could this be vectorized?
         markers[child,2*j+pIndex] <- markers[person, 2*j-2 + u[j]]
       }
@@ -753,7 +859,12 @@ ConditionalSimulation <- function(hap, mapPos, ped) {
   
   founders <- ped[,3] == 0
   markers <- matrix(NA, nrow=nsubj, ncol=nmarker2)
-  markers[founders,] <- hap
+  ind.marker1 <- seq(from=1, by=2, len=nmarker)
+  ind.marker2 <- ind.marker1 + 1
+  ind.founder1 <- seq(from=1, by=2, len=nrow(hap)/2)
+  ind.founder2 <- ind.founder1 + 1
+  markers[founders,ind.marker1] <- hap[ind.founder1,]
+  markers[founders,ind.marker2] <- hap[ind.founder2,]
 
   finished <- rep(FALSE, nsubj)
   finished[founders] <- TRUE
@@ -876,11 +987,22 @@ RunAnalyses <- function(trueModel, altModels, nsim=4, seed=107, nchr=2,
     nSplits <- as.integer(nsim/nSimInEachPedigree)
 
   nAlt <- length(altModels)
+
+  debug <- FALSE
+
+  if (debug) {
+    freq.sum <- 0
+    ibs.sum <- 0
+  }
+##  if (0) {
+##    uall <<- NULL
+##  }
+
   for (i in 1:nSplits) {
     ## Simulate pedigree files and merge these in (file names preceeded with prefix.tmpfiles)
     ## msimAlt1.ped, msimAlt2.ped, ... (nAlt files)
     if (LD) {
-      SimulatePedigreesWithLD(trueModel=trueModel, nsim=nSimInEachPedigree, seed=seed,
+      SimulatePedigreesWithLD(trueModel=trueModel, nsim=nSimInEachPedigree,
                               nSimInEachPedigree=nSimInEachPedigree, nmarker=nmarker, altModels=altModels,
                               nrows=nrows[trueModel])
     }
@@ -891,6 +1013,45 @@ RunAnalyses <- function(trueModel, altModels, nsim=4, seed=107, nchr=2,
     }
     
     lnlik <- NULL
+
+    if (debug) { ## Compute statistics
+      ## 1) Allele frequencies
+      simpedfile <- paste(prefixMerlin.mergedAlt, 1, ".ped", sep="")
+      cmd <- paste("perl -pi~ -e \"s/\\// /g\"", simpedfile)
+      system(cmd)
+      x <- read.table(simpedfile, header=FALSE)
+      ind.marker <- 5 + c(1:(2*nmarker))
+      x.markers <- x[,ind.marker]
+      dim.x <- dim(x.markers)
+      x.markers2 <- lapply(x.markers, as.character)
+      for (i in 1:(2*nmarker))
+        x.markers2[[i]] <- as.integer(substring(as.character(x.markers2[[i]]), 1, 1))
+      x.markers <- data.frame(x.markers2)
+      
+      ind.typed <- x.markers[,1] != 0
+      x.markers <- x.markers[ind.typed,] - 1
+      marker <- rep(1:nmarker, each=2)
+
+      freq <- apply(x.markers, 2, mean)
+      freq <- tapply(freq, marker, mean)
+      freq.sum <- freq.sum + freq
+
+      ## 2) IBS statistics
+      nfam <- length(x.markers[,1])/2
+##      family <- rep(1:nfam, each=2)
+      subject <- rep(1:2, nfam)
+##      x.1 <- tapply(x.markers==0, marker, sum)
+##      x.2 <- 2 - x.1
+      I <- seq(from=1, by=2, len=nmarker)
+      ibsA1.s1 <- (x.markers[subject==1,I, drop=FALSE]==0) + (x.markers[subject==1,I+1, drop=FALSE]==0)
+      ibsA1.s2 <- (x.markers[subject==2,I, drop=FALSE]==0) + (x.markers[subject==2,I+1, drop=FALSE]==0)
+  
+      ibsA1 <- pmin(ibsA1.s1,ibsA1.s2)
+      ibsA2 <- pmin(2-ibsA1.s1, 2-ibsA1.s2)
+      ibs <- ibsA1 + ibsA2
+      
+      ibs.sum <- ibs.sum + apply(ibs, 2, sum)
+    }
     
     for (j in 1:nAlt) {
       merlinCommand <- paste("merlin ",
@@ -912,6 +1073,23 @@ RunAnalyses <- function(trueModel, altModels, nsim=4, seed=107, nchr=2,
     lnlik.allSplits <- cbind(lnlik.allSplits, lnlik)
   }
   rownames(lnlik.allSplits) <- altModels
+
+##  if (0) {
+##    cat("Dimenstion uall ", dim(uall), "\n")
+##    hap.debug <- haplodata(uall)
+##    cat("Debug haplotypes\n")
+##    cat("Frequency\n")
+##    print(hap.debug$freqs)
+##    cat("LD correlation\n")
+##    print(hap.debug$cor)
+##    cat("Covariance matrix for the normal distribution\n")
+##    print(hap.debug$cov)
+##  }
+
+  if (debug) {
+    cat("Debug: freq: ", head(freq.sum/nSplits,n=5), "\n")
+    cat("Debug: ibs:  ", head(ibs.sum/(nSplits*nSimInEachPedigree),n=5), "\n")
+  }
   
   ## Return likelihoods
   lnlik.allSplits
@@ -1366,7 +1544,7 @@ SelectSNPs <- function(freqObj, neach, chr=c(1:22), threshold=0.1, limitCentiMor
     if (printInfo) {
       cat("Summary for chromosome ", i, ": ")
       print(summary(apply(freqObjSub[[i]][,3:4], 1, min)))
-      ##    print(dim(freqObjSub[[i]]))
+      print(dim(freqObjSub[[i]]))
     }
   }
   invisible(freqObjSub)
